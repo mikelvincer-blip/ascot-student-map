@@ -83,13 +83,12 @@
 (() => {
   const map = L.map('map', { worldCopyJump: true, minZoom: 2 }).setView([15, 10], 2);
 
-  // Use CARTO's public basemap instead of the standard OpenStreetMap
-  // tile server. The OSM volunteer tile server can block high-volume
-  // browser traffic with HTTP 403 responses.
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd',
-    maxZoom: 20,
-    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  // Use Esri's public World Street Map tiles. This avoids the
+  // OpenStreetMap/CARTO tile-server 403/API-key problem while keeping
+  // the map fully interactive.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: 'Tiles &copy; Esri — Source: Esri, HERE, Garmin, Intermap, increment P Corp., GEBCO, USGS, FAO, NPS, NRCAN, GeoBase, IGN, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), (c) OpenStreetMap contributors, and the GIS User Community'
   }).addTo(map);
 
   let mode = 'world';
