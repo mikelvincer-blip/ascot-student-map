@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Global & Philippines Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+ integrity="sha256-p4NxAoJBhIINfQ3wJm4y1fKqY9pRjv7m2pQvZQ3x2gA=" crossorigin=""/>
+<style>
+  :root { --navy:#12304a; --gold:#d6a84f; --bg:#f5f7fa; --text:#1e293b; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+  header{background:linear-gradient(135deg,var(--navy),#1d5274);color:#fff;padding:20px}
+  header h1{margin:0 0 6px;font-size:24px}
+  header p{margin:0;opacity:.9}
+  .wrap{max-width:1200px;margin:auto;padding:16px}
+  .toolbar{background:#fff;border:1px solid #dbe2e8;border-radius:12px;padding:14px;margin-bottom:12px}
+  .views{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  button{min-height:44px;border:0;border-radius:9px;padding:10px 16px;font-weight:700;cursor:pointer}
+  .view-btn{background:#e8edf2;color:#23384a}
+  .view-btn.active{background:var(--gold);color:#172534}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  input,select{min-height:44px;border:1px solid #cbd5df;border-radius:8px;padding:9px 11px;font-size:16px}
+  #studentName{min-width:220px;flex:1}
+  .primary{background:var(--navy);color:#fff}
+  .secondary{background:#eef2f5;color:#263746}
+  .danger{background:#a73d3d;color:#fff}
+  .status{margin-top:10px;font-size:14px;color:#526271}
+  #map{height:620px;background:#dfe8ee;border-radius:12px;border:1px solid #ccd6de;overflow:hidden}
+  .legend{margin-top:12px;background:#fff;border:1px solid #dbe2e8;border-radius:12px;padding:12px}
+  .legend strong{display:block;margin-bottom:6px}
+  #pinList{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}
+  .pin-card{border:1px solid #e0e6eb;border-radius:9px;padding:9px;background:#fafcfd}
+  .pin-card small{color:#64748b}
+  .instructions{font-size:14px;line-height:1.5;margin:8px 0 0}
+  .leaflet-popup-content{font-size:14px}
+  @media(max-width:700px){#map{height:520px}.actions{align-items:stretch}.actions>*{width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>ASCOT College of Law — Student Location Map</h1>
+    <p>Select a view, then click the map to place your student pin.</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="toolbar">
+    <div class="views" role="tablist" aria-label="Map view">
+      <button type="button" id="worldBtn" class="view-btn active">🌎 World Map</button>
+      <button type="button" id="phBtn" class="view-btn">🇵🇭 Philippines Map</button>
+    </div>
+
+    <div class="actions">
+      <input id="studentName" type="text" maxlength="80" placeholder="Student name">
+      <button type="button" id="addModeBtn" class="primary">📍 Add Student Pin</button>
+      <button type="button" id="cancelBtn" class="secondary">Cancel</button>
+      <button type="button" id="exportBtn" class="secondary">Export CSV</button>
+      <button type="button" id="clearBtn" class="danger">Clear Pins</button>
+    </div>
+
+    <div id="status" class="status" aria-live="polite">
+      World view selected. Enter a name and click “Add Student Pin”, then click the map.
+    </div>
+    <p class="instructions">
+      <strong>How it works:</strong> Students can use either map. In World Map, place a pin anywhere in the world.
+      In Philippines Map, zoom in and click the approximate location. Pins are held in this browser session and can be exported as CSV.
+    </p>
+  </section>
+
+  <div id="map" aria-label="Interactive student location map"></div>
+
+  <section class="legend">
+    <strong>Student Pins (<span id="pinCount">0</span>)</strong>
+    <div id="pinList"></div>
+  </section>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+ integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(() => {
+  const map = L.map('map', { worldCopyJump: true, minZoom: 2 }).setView([15, 10], 2);
+
+  // Use CARTO's public basemap instead of the standard OpenStreetMap
+  // tile server. The OSM volunteer tile server can block high-volume
+  // browser traffic with HTTP 403 responses.
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd',
+    maxZoom: 20,
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  }).addTo(map);
+
+  let mode = 'world';
+  let adding = false;
+  let pins = [];
+  const markers = new Map();
+
+  const worldBtn = document.getElementById('worldBtn');
+  const phBtn = document.getElementById('phBtn');
+  const nameInput = document.getElementById('studentName');
+  const addModeBtn = document.getElementById('addModeBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const status = document.getElementById('status');
+  const pinList = document.getElementById('pinList');
+  const pinCount = document.getElementById('pinCount');
+
+  function setStatus(msg){ status.textContent = msg; }
+
+  function setMode(newMode){
+    mode = newMode;
+    worldBtn.classList.toggle('active', mode === 'world');
+    phBtn.classList.toggle('active', mode === 'philippines');
+    adding = false;
+    if(mode === 'world'){
+      map.setView([15, 10], 2);
+      setStatus('World view selected. Enter a name and click “Add Student Pin”, then click the map.');
+    }else{
+      map.setView([12.8797, 121.7740], 6);
+      setStatus('Philippines view selected. Enter a name and click “Add Student Pin”, then click the map.');
+    }
+  }
+
+  worldBtn.addEventListener('click', () => setMode('world'));
+  phBtn.addEventListener('click', () => setMode('philippines'));
+
+  addModeBtn.addEventListener('click', () => {
+    const name = nameInput.value.trim();
+    if(!name){
+      nameInput.focus();
+      setStatus('Please enter the student name first.');
+      return;
+    }
+    adding = true;
+    map.getContainer().style.cursor = 'crosshair';
+    setStatus('Pin mode is ON. Click the map at the student’s location.');
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    adding = false;
+    map.getContainer().style.cursor = '';
+    setStatus('Pin placement cancelled.');
+  });
+
+  map.on('click', (e) => {
+    if(!adding) return;
+    const name = nameInput.value.trim();
+    if(!name) return;
+
+    const record = {
+      id: Date.now() + Math.random(),
+      name,
+      view: mode === 'world' ? 'World' : 'Philippines',
+      lat: Number(e.latlng.lat.toFixed(6)),
+      lng: Number(e.latlng.lng.toFixed(6))
+    };
+    pins.push(record);
+
+    const marker = L.marker([record.lat, record.lng]).addTo(map);
+    marker.bindPopup(
+      '<strong>' + escapeHtml(record.name) + '</strong><br>' +
+      escapeHtml(record.view) + '<br>' +
+      record.lat + ', ' + record.lng
+    );
+    markers.set(record.id, marker);
+
+    adding = false;
+    map.getContainer().style.cursor = '';
+    nameInput.value = '';
+    renderList();
+    setStatus('Pin added for ' + record.name + '.');
+  });
+
+  function renderList(){
+    pinCount.textContent = pins.length;
+    if(!pins.length){
+      pinList.innerHTML = '<div style="color:#64748b">No student pins yet.</div>';
+      return;
+    }
+    pinList.innerHTML = '';
+    pins.slice().reverse().forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'pin-card';
+      card.innerHTML =
+        '<strong>' + escapeHtml(p.name) + '</strong><br>' +
+        '<small>' + escapeHtml(p.view) + ' · ' + p.lat + ', ' + p.lng + '</small><br>' +
+        '<button type="button" class="secondary remove" style="margin-top:7px;min-height:36px;padding:6px 10px">Remove</button>';
+      card.querySelector('.remove').addEventListener('click', () => removePin(p.id));
+      pinList.appendChild(card);
+    });
+  }
+
+  function removePin(id){
+    const marker = markers.get(id);
+    if(marker){ map.removeLayer(marker); markers.delete(id); }
+    pins = pins.filter(p => p.id !== id);
+    renderList();
+    setStatus('Student pin removed.');
+  }
+
+  clearBtn.addEventListener('click', () => {
+    if(!pins.length){ setStatus('There are no pins to clear.'); return; }
+    if(!confirm('Clear all student pins from this session?')) return;
+    markers.forEach(m => map.removeLayer(m));
+    markers.clear();
+    pins = [];
+    renderList();
+    setStatus('All pins cleared.');
+  });
+
+  exportBtn.addEventListener('click', () => {
+    if(!pins.length){ setStatus('Add at least one pin before exporting.'); return; }
+    const rows = [
+      ['Student Name','Map View','Latitude','Longitude'],
+      ...pins.map(p => [p.name,p.view,p.lat,p.lng])
+    ];
+    const csv = rows.map(row => row.map(csvCell).join(',')).join('\\r\\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'student-location-pins.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus('CSV exported successfully.');
+  });
+
+  function csvCell(value){
+    const s = String(value ?? '');
+    return '"' + s.replace(/"/g,'""') + '"';
+  }
+  function escapeHtml(value){
+    return String(value).replace(/[&<>"']/g, ch => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+    }[ch]));
+  }
+
+  renderList();
+})();
+</script>
+</body>
+</html>
